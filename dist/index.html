@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <!--  -->
+    <script type="systemjs-importmap">
+      {
+        "imports": {
+          "react": "https://cdn.bootcdn.net/ajax/libs/react/17.0.2/umd/react.production.min.js",
+          "react-dom": "https://cdn.bootcdn.net/ajax/libs/react-dom/17.0.2/umd/react-dom.production.min.js"
+        }
+      }
+    </script>
+    <!-- 这个html相当于父应用 -->
+    <div id="root"></div>
+    <!-- <script src="https://cdn.bootcdn.net/ajax/libs/systemjs/6.10.2/system.min.js"></script> -->
+    <script>
+      // 这里可以动态加载模块 可以加载远程连接
+      // 这个index.js是打包出来的index.js文件 用到了react react-dom
+      // 由于配置了externals不会被打包 所以上面要配置两个cdn的链接
+      // 会先加载 react react-dom 再加载index.js
+      // 公共模块必须提成cdn的写法  主应用 -A(react) -B(react) 一个应用接入两个react的子应用
+      // 那么就要把react提出来 否则多打包了一次
+      //System.import('./index.js')
+
+      //========== 参照打包后的index.js 写system.js原理
+      function SystemJS() {}
+      let set = new Set();
+      function saveGlobalPro() {
+        for (let p in window) {
+          set.add(p);
+        }
+      }
+      function getGlobalLastPro() {
+        let result;
+        for (let p in window) {
+          if (set.has(p)) continue;
+          result = window[p];
+          result.default = result;
+        }
+        return result;
+      }
+      saveGlobalPro();
+      function load(id) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = id;
+          script.async = true;
+          document.head.appendChild(script);
+          script.addEventListener("load", function () {
+            // console.log("脚本加载完成");
+            // 加载后会拿到 依赖 和 回调
+            let _lastRegister = lastRegister; // 加载index.js需要的依赖 这里是react react-dom
+            lastRegister = undefined;
+            // 没有依赖的情况
+            if (!_lastRegister) {
+              resolve([[], function () {}]);
+            }
+            resolve(_lastRegister);
+          });
+        });
+      }
+      SystemJS.prototype.import = function (id) {
+        return new Promise((resolve, reject) => {
+          const lastStepIndex = window.location.href.lastIndexOf("/");
+          const baseURL = window.location.href.slice(0, lastStepIndex + 1);
+          // file:///C:/Users/zhang/Desktop/Single-SPA/dist/
+          if (id.startsWith("./")) {
+            resolve(baseURL + id.slice(2));
+          }
+        }).then((id) => {
+          // file:///C:/Users/zhang/Desktop/Single-SPA/dist/index.js
+          let exec;
+          // 这里可以再封装成system模块递归加载
+          return load(id)
+            .then((registerition) => {
+              function _export() {}
+              let declared = registerition[1](_export);
+              // console.log(declared); {setters:[],execute:function(){}}
+              // 加载react 和 react-dom 加载完毕后调用setters
+              // 调用执行函数
+              exec = declared.execute;
+              return [registerition[0], declared.setters];
+            })
+            .then((info) => {
+              return Promise.all(
+                info[0].map((dep, i) => {
+                  var setter = info[1][i];
+                  return load(dep).then((r) => {
+                    let p = getGlobalLastPro();
+                    // 这里如何获取 react 和 react-dom
+                    // react 和 react-dom 会给全局增添属性 window.React 和 window.ReactDOM
+                    setter(p); // 传入加载后的文件
+                  });
+                })
+              );
+            })
+            .then(() => {
+              exec();
+            });
+        });
+      };
+      let lastRegister;
+      // 打包后 用户加载index.js 默认执行 register 方法
+      SystemJS.prototype.register = function (deps, declare) {
+        // deps 所有的依赖 , declare回调函数
+        lastRegister = [deps, declare]; // 将本次注册的依赖和声明 暴露出来
+      };
+      let System = new SystemJS();
+      System.import("./index.js").then(() => {});
+    </script>
+  </body>
+</html>
